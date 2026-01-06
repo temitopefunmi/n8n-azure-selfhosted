@@ -1,0 +1,8 @@
+
+location            = "your location"
+vm_admin_username   = "your username"
+
+postgres_password  = "replace_me"
+n8n_encryption_key = "replace_me"
+
+ssh_public_key_path = "~/.ssh/id_rsa.pub"

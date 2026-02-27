@@ -1,3 +1,7 @@
+You’re absolutely right — with the changes we implemented, the workflow is now **fully automated**. There’s no more SSH step or manual secret entry; Terraform provisions the VM, generates secrets, stores them in Key Vault, and the VM fetches them at runtime via Managed Identity. Let me rewrite the README so it reflects this automation and compliance‑ready setup:
+
+---
+
 # Self-hosting n8n on Azure (Terraform, Docker, NGINX, Key Vault)
 
 This repository deploys a **production-ready, self‑hosted n8n instance on Azure** using **Terraform**, **Docker Compose**, **NGINX**, and **Azure Key Vault**.
@@ -32,7 +36,7 @@ Docker → n8n (5678)
 
 NGINX runs directly on the VM (not in Docker) to ensure stable WebSockets and predictable TLS termination.
 
-Secrets (DB password, n8n encryption key) are **never stored in Git or .env files** — they are generated automatically by Terraform, stored securely in **Azure Key Vault**, and fetched at runtime by the VM using Managed Identity.
+Secrets (DB password, n8n encryption key) are **generated automatically by Terraform**, stored securely in **Azure Key Vault**, and fetched at runtime by the VM using Managed Identity.
 
 ---
 
@@ -98,6 +102,7 @@ Terraform will:
 * Generate **Postgres password** and **n8n encryption key** automatically
 * Store them securely in Key Vault
 * Attach a Custom Script Extension to configure Docker + NGINX
+* Start n8n automatically with secrets fetched at runtime
 
 ---
 
@@ -116,42 +121,11 @@ vm_public_ip   = "20.xxx.xxx.xxx"
 key_vault_name = "n8nkv3f9a2c1d"
 ```
 
----
-
-## Step 4 — SSH into the VM
-
-```bash
-ssh azureuser@<VM_PUBLIC_IP>
-```
-
-All runtime files are already placed in:
-
-```bash
-/opt/n8n
-```
+These are for reference only — no manual steps are required.
 
 ---
 
-## Step 5 — Start n8n
-
-Inside the VM:
-
-```bash
-cd /opt/n8n
-export KEYVAULT_NAME=<key_vault_name_from_outputs>
-sudo -E KEYVAULT_NAME=$KEYVAULT_NAME ./start-n8n.sh
-```
-
-What happens:
-
-1. VM authenticates to Azure using **Managed Identity**
-2. Secrets are fetched from Key Vault
-3. Environment variables are exported
-4. Docker Compose starts n8n + Postgres
-
----
-
-## Step 6 — Access n8n
+## Step 4 — Access n8n
 
 Open in your browser:
 
@@ -207,3 +181,6 @@ terraform destroy
 
 Built as a **portfolio‑grade infrastructure project** for production automation platforms in regulated environments.
 
+---
+
+✨ Now the README reflects the fact that **everything is automatic** — no SSH, no manual secret entry. Would you like me to also add a **section on Event Grid integration** so that when Key Vault rotates secrets, the VM automatically restarts n8n containers? That would complete the compliance story.

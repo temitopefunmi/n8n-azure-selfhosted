@@ -48,13 +48,3 @@ variable "docker_compose_url" {
   description = "Raw GitHub URL for docker-compose.yml"
   type        = string
 }
-
-variable "postgres_password" {
-  type      = string
-  sensitive = true
-}
-
-variable "n8n_encryption_key" {
-  type      = string
-  sensitive = true
-}

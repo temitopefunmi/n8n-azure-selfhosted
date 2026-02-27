@@ -39,11 +39,11 @@ echo "Docker is ready"
 cd /opt/n8n
 
 # ---- Clean old containers and volumes ----
-sudo /usr/local/bin/docker-compose down -v || true
+sudo docker-compose down -v || true
 
 # ---- Start containers ----
 echo "Starting Postgres and n8n containers..."
-sudo /usr/local/bin/docker-compose up -d
+sudo docker-compose up -d
 
 # ---- Wait for Postgres to be healthy ----
 POSTGRES_CONTAINER="n8n_postgres_1"

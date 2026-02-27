@@ -112,6 +112,7 @@ Requires=docker.service
 Type=simple
 User=root
 Environment=KEYVAULT_NAME=${KEYVAULT_NAME}
+Environment="PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin"
 WorkingDirectory=${TARGET_DIR}
 ExecStart=${TARGET_DIR}/start-n8n.sh
 Restart=always

@@ -34,7 +34,7 @@ sudo apt-get install -y --no-install-recommends \
   lsb-release \
   gnupg \
   docker.io \
-  docker-compose-plugin \
+  docker-compose \
   nginx \
   jq \
   openssl

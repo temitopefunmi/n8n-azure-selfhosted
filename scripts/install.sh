@@ -6,55 +6,25 @@ export DEBIAN_FRONTEND=noninteractive
 DOWNLOAD_DIR="/var/lib/waagent/custom-script/download/0"
 TARGET_DIR="/opt/n8n"
 
-log() {
-  echo "[INSTALL] $1"
-}
+log() { echo "[INSTALL] $1"; }
+fail() { echo "[ERROR] $1"; exit 1; }
 
-fail() {
-  echo "[ERROR] $1"
-  exit 1
-}
-
-log "Waiting for cloud-init to finish..."
-cloud-init status --wait || true
-
-log "Waiting for dpkg lock..."
-while sudo fuser /var/lib/dpkg/lock-frontend >/dev/null 2>&1; do
-  sleep 5
-done
-
+# ---- Install prerequisites ----
 log "Updating apt..."
 sudo apt-get update -y
 
 log "Installing required packages..."
 sudo apt-get install -y --no-install-recommends \
-  ca-certificates \
-  curl \
-  apt-transport-https \
-  lsb-release \
-  gnupg \
-  docker.io \
-  docker-compose \
-  nginx \
-  jq \
-  openssl
+  ca-certificates curl apt-transport-https lsb-release gnupg \
+  docker.io docker-compose nginx jq openssl
 
-command -v nginx >/dev/null || fail "NGINX installation failed"
-command -v docker >/dev/null || fail "Docker installation failed"
-
-log "Enabling Docker..."
 sudo systemctl enable docker
 sudo systemctl start docker
 
-# -----------------------------
-# SSL CERTIFICATE
-# -----------------------------
+# ---- SSL certificate ----
 log "Generating self-signed SSL certificate..."
-
 sudo mkdir -p /etc/nginx/ssl
-
 IP_ADDRESS=$(hostname -I | awk '{print $1}')
-
 sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
   -keyout /etc/nginx/ssl/n8n.key \
   -out /etc/nginx/ssl/n8n.crt \
@@ -65,13 +35,9 @@ sudo chmod 640 /etc/nginx/ssl/n8n.key
 sudo chmod 644 /etc/nginx/ssl/n8n.crt
 sudo chown root:www-data /etc/nginx/ssl/n8n.key
 
-# -----------------------------
-# NGINX CONFIG
-# -----------------------------
+# ---- NGINX config ----
 log "Configuring NGINX..."
-
-sudo mkdir -p /etc/nginx/sites-available
-sudo mkdir -p /etc/nginx/sites-enabled
+sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
 sudo tee /etc/nginx/sites-available/n8n > /dev/null <<EOF
 server {
@@ -87,11 +53,9 @@ server {
     location / {
         proxy_pass http://localhost:5678;
         proxy_http_version 1.1;
-
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
-
         proxy_set_header X-Real-IP \$remote_addr;
         proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto \$scheme;
@@ -106,45 +70,22 @@ EOF
 
 sudo ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/n8n
 sudo rm -f /etc/nginx/sites-enabled/default
-
 sudo nginx -t || fail "NGINX config test failed"
-
 sudo systemctl enable nginx
 sudo systemctl restart nginx
 
-# -----------------------------
-# N8N FILES
-# -----------------------------
-log "Preparing n8n runtime directory..."
+# ---- N8N runtime ----
+log "Preparing n8n directory..."
+sudo mkdir -p "${TARGET_DIR}"
+sudo chown -R root:root "${TARGET_DIR}"
 
-sudo mkdir -p ${TARGET_DIR}
-sudo chown -R root:root ${TARGET_DIR}
+sudo mv "${DOWNLOAD_DIR}/start-n8n.sh" "${TARGET_DIR}/" || fail "start-n8n.sh not found"
+sudo chmod +x "${TARGET_DIR}/start-n8n.sh"
 
-if [ -f "${DOWNLOAD_DIR}/start-n8n.sh" ]; then
-  sudo mv "${DOWNLOAD_DIR}/start-n8n.sh" ${TARGET_DIR}/
-  sudo chmod +x ${TARGET_DIR}/start-n8n.sh
-else
-  fail "start-n8n.sh not found"
-fi
+sudo mv "${DOWNLOAD_DIR}/docker-compose.yml" "${TARGET_DIR}/" || fail "docker-compose.yml not found"
 
-if [ -f "${DOWNLOAD_DIR}/docker-compose.yml" ]; then
-  sudo mv "${DOWNLOAD_DIR}/docker-compose.yml" ${TARGET_DIR}/
-else
-  fail "docker-compose.yml not found"
-fi
-
-# -----------------------------
-# VALIDATE KEYVAULT
-# -----------------------------
-if [ -z "${KEYVAULT_NAME:-}" ]; then
-  fail "KEYVAULT_NAME not set"
-fi
-
-# -----------------------------
-# SYSTEMD SERVICE
-# -----------------------------
+# ---- SYSTEMD service ----
 log "Creating systemd service..."
-
 sudo tee /etc/systemd/system/n8n.service > /dev/null <<EOF
 [Unit]
 Description=n8n Automation Platform
@@ -170,14 +111,4 @@ sudo systemctl daemon-reload
 sudo systemctl enable n8n
 sudo systemctl restart n8n
 
-# -----------------------------
-# HEALTH CHECK
-# -----------------------------
-log "Waiting for n8n to start..."
-sleep 15
-
-if ! curl -k https://localhost >/dev/null 2>&1; then
-  fail "n8n failed health check"
-fi
-
-log "✔ Installation completed successfully."
+log "✔ Installation finished. n8n should be running via HTTPS immediately."

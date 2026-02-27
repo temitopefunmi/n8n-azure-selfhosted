@@ -1,48 +1,57 @@
 #!/bin/bash
-set -e
+set -euo pipefail
 
-# ===============================================
-# 🚀 Start n8n (Secrets pulled from Azure Key Vault)
-# ===============================================
+# -----------------------------
+# Production-ready n8n startup
+# -----------------------------
+LOG_FILE="/var/log/n8n-start.log"
+exec >> "$LOG_FILE" 2>&1
 
-# ---- CONFIG ----
+echo "===== $(date) Starting n8n startup script ====="
+
 KEYVAULT_NAME="${KEYVAULT_NAME:?KEYVAULT_NAME is not set}"
 
-# ---- LOGIN USING MANAGED IDENTITY ----
-echo "🔐 Authenticating to Azure using Managed Identity..."
-az login --identity --allow-no-subscriptions --output none
+# ---- Login using Managed Identity ----
+echo "Authenticating to Azure..."
+/usr/bin/az login --identity --allow-no-subscriptions --output none
 
-# ---- FETCH SECRETS FROM KEY VAULT ----
-echo "🔑 Fetching secrets from Azure Key Vault..."
+# ---- Fetch Secrets ----
+echo "Fetching secrets from Azure Key Vault..."
+POSTGRES_PASSWORD=$(/usr/bin/az keyvault secret show --vault-name "$KEYVAULT_NAME" --name postgres-password --query value -o tsv)
+N8N_ENCRYPTION_KEY=$(/usr/bin/az keyvault secret show --vault-name "$KEYVAULT_NAME" --name n8n-encryption-key --query value -o tsv)
 
-POSTGRES_PASSWORD=$(az keyvault secret show \
-  --vault-name "$KEYVAULT_NAME" \
-  --name postgres-password \
-  --query value -o tsv)
-
-N8N_ENCRYPTION_KEY=$(az keyvault secret show \
-  --vault-name "$KEYVAULT_NAME" \
-  --name n8n-encryption-key \
-  --query value -o tsv)
-
-# ---- VALIDATE SECRETS ----
 if [[ -z "$POSTGRES_PASSWORD" || -z "$N8N_ENCRYPTION_KEY" ]]; then
-  echo "❌ Failed to retrieve required secrets from Key Vault"
+  echo "ERROR: Failed to retrieve required secrets from Key Vault"
   exit 1
 fi
 
-# ---- EXPORT FOR DOCKER COMPOSE ----
 export POSTGRES_PASSWORD
 export N8N_ENCRYPTION_KEY
+echo "Secrets loaded successfully"
 
-echo "✅ Secrets loaded into environment"
+# ---- Wait for Docker daemon ----
+echo "Waiting for Docker to be ready..."
+while ! sudo docker info > /dev/null 2>&1; do
+  sleep 2
+done
+echo "Docker is ready"
 
-# ---- START N8N ----
 cd /opt/n8n
 
-echo "🚀 Starting n8n with docker-compose..."
-docker-compose up -d
+# ---- Clean old containers and volumes ----
+sudo /usr/local/bin/docker-compose down -v || true
 
-echo ""
-echo "✅ n8n started successfully"
-echo "🌐 Access via VM public IP (or domain if configured)"
+# ---- Start containers ----
+echo "Starting Postgres and n8n containers..."
+sudo /usr/local/bin/docker-compose up -d
+
+# ---- Wait for Postgres to be healthy ----
+POSTGRES_CONTAINER="n8n_postgres_1"
+echo "Waiting for Postgres to initialize..."
+until sudo docker exec "$POSTGRES_CONTAINER" pg_isready -U postgres > /dev/null 2>&1; do
+  sleep 2
+done
+echo "Postgres is ready"
+
+echo "n8n containers should now be running"
+echo "===== $(date) Finished n8n startup script ====="

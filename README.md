@@ -4,9 +4,9 @@ This repository deploys a **production-ready, self‑hosted n8n instance on Azur
 
 The goal is simple:
 
-> Run `terraform apply`, SSH once, start n8n, and access it immediately — **without hard‑coding secrets or losing data**.
+> Run `terraform apply` and get a fully working n8n stack — **with secrets generated securely, stored in Key Vault, and consumed at runtime via Managed Identity**.
 
-This setup is suitable for **regulated / healthcare‑adjacent environments** (HIPAA‑aware), and demonstrates real‑world infrastructure practices.
+This setup is designed for **regulated / healthcare‑adjacent environments** (HIPAA‑aware) and demonstrates real‑world infrastructure practices for secure automation.
 
 ---
 
@@ -16,14 +16,14 @@ This setup is suitable for **regulated / healthcare‑adjacent environments** (H
 * **Docker + Docker Compose**
 * **n8n (self‑hosted)**
 * **PostgreSQL (Dockerized)**
-* **NGINX (reverse proxy, HTTP)**
+* **NGINX (reverse proxy, HTTPS)**
 * **Azure Key Vault (secrets at runtime)**
 * **Managed Identity (no stored cloud credentials)**
 
 ```
 Internet
    ↓
-NGINX (port 80)
+NGINX (port 443, TLS termination)
    ↓
 Docker → n8n (5678)
           ↓
@@ -32,7 +32,7 @@ Docker → n8n (5678)
 
 NGINX runs directly on the VM (not in Docker) to ensure stable WebSockets and predictable TLS termination.
 
-Secrets (DB password, n8n encryption key) are **never stored in Git or .env files** — they are fetched securely from **Azure Key Vault at runtime**.
+Secrets (DB password, n8n encryption key) are **never stored in Git or .env files** — they are generated automatically by Terraform, stored securely in **Azure Key Vault**, and fetched at runtime by the VM using Managed Identity.
 
 ---
 
@@ -40,12 +40,10 @@ Secrets (DB password, n8n encryption key) are **never stored in Git or .env file
 
 ```
 .
-├── main.tf               # All Azure resources
-├── variables.tf          # Input variables
-├── terraform.tfvars      # Your environment values
+├── main.tf               # All Azure resources (VM, Key Vault, NSG, etc.)
 ├── outputs.tf            # Values you need after deployment
 ├── scripts/
-│   ├── install.sh        # Installs Docker, NGINX, tools
+│   ├── install.sh        # Installs Docker, NGINX, tools, SSL config
 │   ├── start-n8n.sh      # Runtime entrypoint fetches secrets + starts n8n
 │   └── docker-compose.yml
 ├── .gitignore
@@ -56,23 +54,16 @@ Secrets (DB password, n8n encryption key) are **never stored in Git or .env file
 
 ## Prerequisites (Local Machine)
 
-Before starting, you need:
-
 * Azure subscription
 * Azure CLI (`az login` already done)
 * Terraform ≥ 1.5
 * SSH keypair
 
-Generate an SSH key **once** if you don’t have one:
+Generate an SSH key if you don’t have one:
 
 ```bash
 ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "n8n-azure"
 ```
-
-This creates:
-
-* `~/.ssh/id_ed25519` (private key)
-* `~/.ssh/id_ed25519.pub` (public key)
 
 ---
 
@@ -81,20 +72,16 @@ This creates:
 Edit `terraform.tfvars`:
 
 ```hcl
-resource_prefix = "n8n"
-location        = "eastus"
-vm_size         = "Standard_B2s"
-admin_username  = "azureuser"
+resource_prefix     = "n8n"
+location            = "eastus"
+vm_size             = "Standard_B2s"
+admin_username      = "azureuser"
 ssh_public_key_path = "~/.ssh/id_ed25519.pub"
 ```
-
-> 💡 The public key is injected into the VM automatically. No passwords are used.
 
 ---
 
 ## Step 2 — Deploy Infrastructure
-
-From the repo root:
 
 ```bash
 terraform init
@@ -105,16 +92,12 @@ terraform apply
 Terraform will:
 
 * Create a resource group
-* Create a Linux VM
-* Create a Network Security Group
-* Allow inbound ports:
-
-  * 22 (SSH)
-  * 80 (NGINX / n8n)
+* Create a Linux VM with Managed Identity
+* Create a Network Security Group (allowing 22, 80, 443)
 * Create Azure Key Vault
-* Enable Managed Identity on the VM
-* Attach a Custom Script Extension
-* Upload scripts into the VM
+* Generate **Postgres password** and **n8n encryption key** automatically
+* Store them securely in Key Vault
+* Attach a Custom Script Extension to configure Docker + NGINX
 
 ---
 
@@ -129,39 +112,13 @@ terraform output
 You will see values like:
 
 ```text
-vm_public_ip = "20.xxx.xxx.xxx"
+vm_public_ip   = "20.xxx.xxx.xxx"
 key_vault_name = "n8nkv3f9a2c1d"
 ```
 
-Save them — you will need both.
-
 ---
 
-## Step 4 — Create Secrets in Azure Key Vault (One-Time step)
-
-After Terraform completes, secrets must be written to Azure Key Vault.
-
-This step is intentionally not automated by Terraform to avoid storing secrets in state files.
-
-Run the following command from your local machine:
-
-```bash
-./scripts/configure-secrets.sh <KEY_VAULT_NAME> 
-```
-
-You will be prompted to enter:
-
-- PostgreSQL password
-
-- n8n encryption key
-
-The secrets are securely stored in Azure Key Vault and retrieved at runtime by the VM using Managed Identity.
-
-⚠️ **Never rotate `n8n-encryption-key` after production start** — doing so breaks credentials.
-
----
-
-## Step 5 — SSH into the VM
+## Step 4 — SSH into the VM
 
 ```bash
 ssh azureuser@<VM_PUBLIC_IP>
@@ -175,46 +132,34 @@ All runtime files are already placed in:
 
 ---
 
-## Step 6 — Export Key Vault Name (Runtime Only)
+## Step 5 — Start n8n
 
 Inside the VM:
 
 ```bash
-export KEYVAULT_NAME=<KEY_VAULT_NAME>
-```
-This allows the runtime script to locate the correct Key Vault without persisting the value on disk.
-
-This is not stored anywhere — it exists only in the shell session.
-
----
-
-## Step 7 — Start n8n
-
-```bash
 cd /opt/n8n
-./start-n8n.sh
+export KEYVAULT_NAME=<key_vault_name_from_outputs>
+sudo -E KEYVAULT_NAME=$KEYVAULT_NAME ./start-n8n.sh
 ```
 
-What this script does:
+What happens:
 
-1. Logs in using **Managed Identity**
-2. Fetches secrets from Key Vault
-3. Exports them as environment variables
-4. Starts Docker Compose
+1. VM authenticates to Azure using **Managed Identity**
+2. Secrets are fetched from Key Vault
+3. Environment variables are exported
+4. Docker Compose starts n8n + Postgres
 
 ---
 
-## Step 8 — Access n8n
+## Step 6 — Access n8n
 
 Open in your browser:
 
 ```
-http://<VM_PUBLIC_IP>
+https://<VM_PUBLIC_IP>
 ```
 
-You should see the **n8n setup page**.
-
-Create your admin user and begin building workflows.
+You should see the **n8n setup page**. Create your admin user and begin building workflows.
 
 ---
 
@@ -223,32 +168,17 @@ Create your admin user and begin building workflows.
 * PostgreSQL data is stored in Docker volumes
 * Container restarts are safe
 * VM reboots do not lose workflows
-* Secrets never touch disk
+* Secrets are rotated automatically in Key Vault
 * The n8n encryption key is externalized and survives redeployments
-
-To restart later:
-
-```bash
-cd /opt/n8n
-docker compose up -d
-```
 
 ---
 
-## HTTPS & Custom Domain (Optional)
+## Secret Rotation
 
-This demo uses **HTTP only**.
-
-⚠️ OAuth providers (Google, Microsoft, Slack, etc.) require HTTPS.
-
-To enable HTTPS:
-
-1. Point a domain to the VM public IP
-2. Install certbot
-3. Add TLS config to NGINX
-4. Set `N8N_PROTOCOL=https`
-
-This is intentionally left out to keep the demo cost‑free.
+* Secrets are generated by Terraform (`random_password`)  
+* Stored in Key Vault with **rotation policies** (e.g., every 90 days)  
+* VM always fetches the latest version at runtime  
+* Rotation events can trigger container restarts for compliance
 
 ---
 
@@ -256,13 +186,12 @@ This is intentionally left out to keep the demo cost‑free.
 
 This project demonstrates:
 
+* Automated secret generation (no manual typing)
 * Secure secret handling (Key Vault + Managed Identity)
 * Docker volume persistence
+* TLS termination with NGINX
 * Clean infrastructure automation
-* Real production failure prevention
-* Recoverable, auditable architecture
-
-This is **not a toy n8n install**.
+* Compliance‑ready architecture for regulated industries
 
 ---
 
@@ -276,7 +205,5 @@ terraform destroy
 
 ## Author
 
-Built as a **portfolio‑grade infrastructure project** for production automation platforms.
-
----
+Built as a **portfolio‑grade infrastructure project** for production automation platforms in regulated environments.
 

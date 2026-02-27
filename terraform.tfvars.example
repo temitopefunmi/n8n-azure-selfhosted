@@ -1,4 +1,4 @@
-
+# Copy to terraform.tfvars and edit the contents
 location            = "your location"
 vm_admin_username   = "your username"
 
@@ -6,3 +6,12 @@ postgres_password  = "replace_me"
 n8n_encryption_key = "replace_me"
 
 ssh_public_key_path = "~/.ssh/id_rsa.pub"
+
+resource_prefix = "n8n"
+address_space = ["10.0.0.0/16"]
+address_prefixes     = ["10.0.1.0/24"]
+vm_size = "Standard_D2s_v3"
+
+install_sh_url     = "https://raw.githubusercontent.com/<user>/<repo>/<commit_hash>/scripts/install.sh"
+start_n8n_sh_url   = "https://raw.githubusercontent.com/<user>/<repo>/<commit_hash>/scripts/start-n8n.sh"
+docker_compose_url = "https://raw.githubusercontent.com/<user>/<repo>/<commit_hash>/scripts/docker-compose.yml"

@@ -33,3 +33,28 @@ variable "vm_size" {
   description = "Size of the VM"
   type = string
 }
+
+variable "install_sh_url" {
+  description = "Raw GitHub URL for install.sh"
+  type        = string
+}
+
+variable "start_n8n_sh_url" {
+  description = "Raw GitHub URL for start-n8n.sh"
+  type        = string
+}
+
+variable "docker_compose_url" {
+  description = "Raw GitHub URL for docker-compose.yml"
+  type        = string
+}
+
+variable "postgres_password" {
+  type      = string
+  sensitive = true
+}
+
+variable "n8n_encryption_key" {
+  type      = string
+  sensitive = true
+}

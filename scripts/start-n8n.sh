@@ -10,7 +10,7 @@ KEYVAULT_NAME="${KEYVAULT_NAME:?KEYVAULT_NAME is not set}"
 
 # ---- LOGIN USING MANAGED IDENTITY ----
 echo "🔐 Authenticating to Azure using Managed Identity..."
-az login --identity --output none
+az login --identity --allow-no-subscriptions --output none
 
 # ---- FETCH SECRETS FROM KEY VAULT ----
 echo "🔑 Fetching secrets from Azure Key Vault..."

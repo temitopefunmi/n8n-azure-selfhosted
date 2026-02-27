@@ -1,18 +1,18 @@
 provider "azurerm" {
-  features {}           
+  features {}
 }
 
-data "azurerm_client_config" "current" {} # Get current client configuration
+data "azurerm_client_config" "current" {}
 
 resource "azurerm_resource_group" "rg" {
-  name = "${var.resource_prefix}-rg"
+  name     = "${var.resource_prefix}-rg"
   location = var.location
 }
 
 resource "azurerm_virtual_network" "vnet" {
-  name = "${var.resource_prefix}-vnet"
-  address_space = var.address_space
-  location = azurerm_resource_group.rg.location
+  name                = "${var.resource_prefix}-vnet"
+  address_space       = var.address_space
+  location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
 }
 
@@ -39,11 +39,11 @@ resource "azurerm_network_interface" "nic" {
     name                          = "internal"
     subnet_id                     = azurerm_subnet.subnet.id
     private_ip_address_allocation = "Dynamic"
-    public_ip_address_id =  azurerm_public_ip.public_ip.id
+    public_ip_address_id          = azurerm_public_ip.public_ip.id
   }
 }
 
-resource azurerm_network_security_group "nsg" {
+resource "azurerm_network_security_group" "nsg" {
   name                = "${var.resource_prefix}-nsg"
   location            = azurerm_resource_group.rg.location
   resource_group_name = azurerm_resource_group.rg.name
@@ -88,32 +88,11 @@ resource azurerm_network_security_group "nsg" {
 resource "azurerm_network_interface_security_group_association" "nsg_association" {
   network_interface_id      = azurerm_network_interface.nic.id
   network_security_group_id = azurerm_network_security_group.nsg.id
-}   
+}
 
 resource "random_id" "rand" {
   byte_length = 3
 }
-
-resource "azurerm_key_vault" "kv" {
-  name                        = "${var.resource_prefix}kv${random_id.rand.hex}"
-  location                    = azurerm_resource_group.rg.location
-  resource_group_name         = azurerm_resource_group.rg.name
-  tenant_id                   = data.azurerm_client_config.current.tenant_id
-  sku_name                    = "standard"
-  purge_protection_enabled    = false
-  soft_delete_retention_days  = 7
-
-  access_policy {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = azurerm_linux_virtual_machine.vm.identity[0].principal_id
-
-    secret_permissions = [
-      "Get",
-      "List"
-    ]
-  }
-}
-
 
 resource "azurerm_linux_virtual_machine" "vm" {
   name                = "${var.resource_prefix}-vm"
@@ -151,33 +130,78 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 }
 
-resource "azurerm_key_vault_access_policy" "vm_access_policy" {
-  key_vault_id = azurerm_key_vault.kv.id
-  tenant_id    = data.azurerm_client_config.current.tenant_id
-  object_id    = azurerm_linux_virtual_machine.vm.identity[0].principal_id
+resource "azurerm_key_vault" "kv" {
+  name                        = "${var.resource_prefix}kv${random_id.rand.hex}"
+  location                    = azurerm_resource_group.rg.location
+  resource_group_name         = azurerm_resource_group.rg.name
+  tenant_id                   = data.azurerm_client_config.current.tenant_id
+  sku_name                    = "standard"
+  purge_protection_enabled    = false
+  soft_delete_retention_days  = 7
 
-  secret_permissions = [
-    "Get",
-    "List"
-  ]
+  # VM identity (read-only)
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = azurerm_linux_virtual_machine.vm.identity[0].principal_id
+
+    secret_permissions = [
+      "Get",
+      "List"
+    ]
+  }
+
+  # Your user/service principal (read + write)
+  access_policy {
+    tenant_id = data.azurerm_client_config.current.tenant_id
+    object_id = data.azurerm_client_config.current.object_id
+
+    secret_permissions = [
+      "Set",
+      "Get",
+      "List"
+    ]
+  }
+  depends_on = [ azurerm_linux_virtual_machine.vm ]
+}
+
+resource "random_password" "postgres_password" {
+  length  = 32
+  special = true
+}
+
+resource "random_password" "n8n_encryption_key" {
+  length  = 32
+  special = true
+}
+
+resource "azurerm_key_vault_secret" "postgres_password" {
+  name         = "postgres-password"
+  value        = random_password.postgres_password.result
+  key_vault_id = azurerm_key_vault.kv.id
+}
+
+resource "azurerm_key_vault_secret" "n8n_encryption_key" {
+  name         = "n8n-encryption-key"
+  value        = random_password.n8n_encryption_key.result
+  key_vault_id = azurerm_key_vault.kv.id
 }
 
 resource "azurerm_virtual_machine_extension" "startup" {
-  name                       = "n8n-setup"
-  virtual_machine_id         = azurerm_linux_virtual_machine.vm.id
-  publisher                  = "Microsoft.Azure.Extensions"
-  type                       = "CustomScript"
-  type_handler_version       = "2.1"
-  depends_on                 = [azurerm_linux_virtual_machine.vm, azurerm_key_vault_access_policy.vm_access_policy]
+  name                 = "n8n-setup"
+  virtual_machine_id   = azurerm_linux_virtual_machine.vm.id
+  publisher            = "Microsoft.Azure.Extensions"
+  type                 = "CustomScript"
+  type_handler_version = "2.1"
+  depends_on           = [azurerm_linux_virtual_machine.vm, azurerm_key_vault.kv]
 
   settings = <<SETTINGS
     {
         "fileUris": [
-            "https://raw.githubusercontent.com/YOUR_GITHUB/scripts/install.sh",
-            "https://raw.githubusercontent.com/YOUR_GITHUB/scripts/start-n8n.sh",
-            "https://raw.githubusercontent.com/YOUR_GITHUB/scripts/docker-compose.yml"
-            ],
-        "commandToExecute": "bash install.sh"
+            "${var.install_sh_url}",
+            "${var.start_n8n_sh_url}",
+            "${var.docker_compose_url}"
+        ],
+        "commandToExecute": "KEYVAULT_NAME=${azurerm_key_vault.kv.name} bash install.sh"
     }
   SETTINGS
 }

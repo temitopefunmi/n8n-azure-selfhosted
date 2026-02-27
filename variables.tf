@@ -1,16 +1,35 @@
 variable "resource_prefix" {
-  default = "n8n"
+  description = "Prefix for naming"
+  type = string
 }
 
 variable "location" {
+  description = "Location of resources"
   type = string
 }
 
 variable "vm_admin_username" {
+  description = "Admin username for the VM"
   type = string
 }
 
 
 variable "ssh_public_key_path" {
   description = "Path to your SSH public key"
+  type = string
+}
+
+variable "address_space" {
+  description = "Address space for the virtual network"
+  type = list(string)
+}
+
+variable "address_prefixes" {
+  description = "Address prefixes for the subnet"
+  type = list(string)
+}
+
+variable "vm_size" {
+  description = "Size of the VM"
+  type = string
 }

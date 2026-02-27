@@ -1,10 +1,10 @@
 output "n8n_url" {
-  value       = "http://${azurerm_public_ip.vm_public_ip.ip_address}"
+  value       = "http://${azurerm_public_ip.public_ip.ip_address}"
   description = "The URL to access the n8n instance"
 }
 
 output "ssh_command" {
-  value       = "ssh ${var.vm_admin_username}@${azurerm_public_ip.vm_public_ip.ip_address}" 
+  value       = "ssh ${var.vm_admin_username}@${azurerm_public_ip.public_ip.ip_address} -i ${var.ssh_public_key_path}" 
   description = "SSH command to connect to the VM"
 }
 

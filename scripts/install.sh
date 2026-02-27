@@ -18,6 +18,22 @@ sudo apt-get install -y --no-install-recommends \
   ca-certificates curl apt-transport-https lsb-release gnupg \
   docker.io docker-compose nginx jq openssl
 
+# ---- Install Azure CLI ----
+log "Installing Azure CLI..."
+curl -sL https://packages.microsoft.com/keys/microsoft.asc | \
+  gpg --dearmor | sudo tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+
+AZ_REPO=$(lsb_release -cs)
+echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $AZ_REPO main" | \
+  sudo tee /etc/apt/sources.list.d/azure-cli.list
+
+sudo apt-get update -y
+sudo apt-get install -y azure-cli
+
+# verify installation
+command -v az >/dev/null 2>&1 || fail "Azure CLI installation failed"
+log "Azure CLI installed at $(which az)"
+
 sudo systemctl enable docker
 sudo systemctl start docker
 

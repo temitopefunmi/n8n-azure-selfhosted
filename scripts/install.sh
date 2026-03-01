@@ -5,6 +5,9 @@ export DEBIAN_FRONTEND=noninteractive
 
 DOWNLOAD_DIR="/var/lib/waagent/custom-script/download/0"
 TARGET_DIR="/opt/n8n"
+SSL_DIR="/etc/nginx/ssl"
+RETRY_COUNT=5
+RETRY_DELAY=10
 
 log() { echo "[INSTALL] $1"; }
 fail() { echo "[ERROR] $1"; exit 1; }
@@ -16,7 +19,7 @@ sudo apt-get update -y
 log "Installing required packages..."
 sudo apt-get install -y --no-install-recommends \
   ca-certificates curl apt-transport-https lsb-release gnupg \
-  docker.io docker-compose nginx jq openssl
+  docker.io docker-compose nginx jq openssl || fail "Package installation failed"
 
 # ---- Install Azure CLI ----
 log "Installing Azure CLI..."
@@ -28,57 +31,60 @@ echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $AZ_REPO 
   sudo tee /etc/apt/sources.list.d/azure-cli.list
 
 sudo apt-get update -y
-sudo apt-get install -y azure-cli
+sudo apt-get install -y azure-cli || fail "Azure CLI installation failed"
 
-# verify installation
-command -v az >/dev/null 2>&1 || fail "Azure CLI installation failed"
+command -v az >/dev/null 2>&1 || fail "Azure CLI not found"
 log "Azure CLI installed at $(which az)"
 
-# Authenticate with the VM's managed identity
-az logout --output none || true
-az login --identity --allow-no-subscriptions --output none || fail "Managed identity login failed"
-log "Logged in with VM's managed identity"
+# ---- Authenticate VM managed identity ----
+log "Logging in with VM managed identity..."
+for i in $(seq 1 $RETRY_COUNT); do
+    az login --identity --allow-no-subscriptions --output none && break || \
+    (log "Retrying managed identity login ($i/$RETRY_COUNT)..." && sleep $RETRY_DELAY)
+done
+
+az account show >/dev/null 2>&1 || fail "Managed identity login failed"
 
 sudo systemctl enable docker
 sudo systemctl start docker
 
-# ---- SSL certificate ----
+# ---- Fetch SSL certificate and password ----
 log "Fetching SSL certificate and password from Key Vault..."
-sudo mkdir -p /etc/nginx/ssl
+sudo mkdir -p "$SSL_DIR"
 
-# Get the PFX as a secret (base64-encoded)
-CERT_PFX=$(az keyvault secret show \
-  --vault-name "${KEYVAULT_NAME}" \
-  --name "n8n-cert" \
-  --query value -o tsv)
+# Fetch password with retries
+for i in $(seq 1 $RETRY_COUNT); do
+    CERT_PASSWORD=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" \
+      --name "n8n-cert-password" --query value -o tsv) && break || \
+    (log "Retrying fetch of cert password ($i/$RETRY_COUNT)..." && sleep $RETRY_DELAY)
+done
 
-# Decode the base64 string into a .pfx file
-echo "$CERT_PFX" | base64 --decode > /etc/nginx/ssl/n8n.pfx
+[ -n "$CERT_PASSWORD" ] || fail "Certificate password is empty"
 
-# Get the password secret
-CERT_PASSWORD=$(az keyvault secret show \
-  --vault-name "${KEYVAULT_NAME}" \
-  --name "n8n-cert-password" \
-  --query value -o tsv)
+# Fetch certificate with retries
+for i in $(seq 1 $RETRY_COUNT); do
+    az keyvault certificate download \
+      --vault-name "${KEYVAULT_NAME}" \
+      --name "n8n-cert" \
+      --file "${SSL_DIR}/n8n.pfx" && break || \
+    (log "Retrying fetch of n8n-cert ($i/$RETRY_COUNT)..." && sleep $RETRY_DELAY)
+done
 
-# Extract PEM files
+[ -f "${SSL_DIR}/n8n.pfx" ] || fail "Certificate file not found"
+
+# Extract PEM
 log "Extracting PEM files from PFX..."
-sudo openssl pkcs12 -in /etc/nginx/ssl/n8n.pfx \
-  -clcerts -nokeys \
-  -out /etc/nginx/ssl/n8n.crt \
-  -password pass:${CERT_PASSWORD}
+sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -clcerts -nokeys \
+  -out "${SSL_DIR}/n8n.crt" -password pass:${CERT_PASSWORD} || fail "Failed to extract cert"
 
-sudo openssl pkcs12 -in /etc/nginx/ssl/n8n.pfx \
-  -nocerts -nodes \
-  -out /etc/nginx/ssl/n8n.key \
-  -password pass:${CERT_PASSWORD}
+sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -nocerts -nodes \
+  -out "${SSL_DIR}/n8n.key" -password pass:${CERT_PASSWORD} || fail "Failed to extract key"
 
-sudo chmod 640 /etc/nginx/ssl/n8n.key
-sudo chmod 644 /etc/nginx/ssl/n8n.crt
-sudo chown root:www-data /etc/nginx/ssl/n8n.key
+sudo chmod 640 "${SSL_DIR}/n8n.key"
+sudo chmod 644 "${SSL_DIR}/n8n.crt"
+sudo chown root:www-data "${SSL_DIR}/n8n.key"
 
-
-# ---- NGINX config ----
+# ---- Configure NGINX ----
 log "Configuring NGINX..."
 sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled
 
@@ -87,8 +93,8 @@ server {
     listen 443 ssl;
     server_name _;
 
-    ssl_certificate /etc/nginx/ssl/n8n.crt;
-    ssl_certificate_key /etc/nginx/ssl/n8n.key;
+    ssl_certificate ${SSL_DIR}/n8n.crt;
+    ssl_certificate_key ${SSL_DIR}/n8n.key;
 
     ssl_protocols TLSv1.2 TLSv1.3;
     ssl_ciphers HIGH:!aNULL:!MD5;

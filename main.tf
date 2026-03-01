@@ -139,34 +139,40 @@ resource "azurerm_key_vault" "kv" {
   purge_protection_enabled    = false
   soft_delete_retention_days  = 7
 
-  # VM identity (read-only)
-  access_policy {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = azurerm_linux_virtual_machine.vm.identity[0].principal_id
-
-    secret_permissions = [
-      "Get",
-      "List"
-    ]
-    certificate_permissions = [
-      "Get"
-    ]
-  }
-
-  # Your user/service principal (read + write)
-  access_policy {
-    tenant_id = data.azurerm_client_config.current.tenant_id
-    object_id = data.azurerm_client_config.current.object_id
-
-    secret_permissions = [
-      "Set",
-      "Get",
-      "List"
-    ]
-  }
-  depends_on = [ azurerm_linux_virtual_machine.vm ]
 }
 
+# VM managed identity policy
+resource "azurerm_key_vault_access_policy" "vm_policy" {
+  key_vault_id = azurerm_key_vault.kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = azurerm_linux_virtual_machine.vm.identity[0].principal_id
+
+  secret_permissions = [
+    "Get",
+    "List"
+  ]
+
+  certificate_permissions = [
+    "Get",
+    "List",
+    "Import",
+    "Delete"
+  ]
+}
+
+# Current Terraform user policy
+resource "azurerm_key_vault_access_policy" "current_user_policy" {
+  key_vault_id = azurerm_key_vault.kv.id
+  tenant_id    = data.azurerm_client_config.current.tenant_id
+  object_id    = data.azurerm_client_config.current.object_id
+
+  secret_permissions = [
+    "Set",
+    "Get",
+    "List"
+  ]
+
+}
 resource "azurerm_key_vault_certificate" "n8n_cert" {
   name         = "n8n-cert"
   key_vault_id = azurerm_key_vault.kv.id
@@ -211,7 +217,7 @@ resource "azurerm_virtual_machine_extension" "startup" {
   publisher            = "Microsoft.Azure.Extensions"
   type                 = "CustomScript"
   type_handler_version = "2.1"
-  depends_on           = [azurerm_linux_virtual_machine.vm, azurerm_key_vault.kv]
+  depends_on           = [azurerm_linux_virtual_machine.vm, azurerm_key_vault_access_policy.vm_policy]
 
   settings = <<SETTINGS
     {

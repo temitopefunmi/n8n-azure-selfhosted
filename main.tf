@@ -154,9 +154,7 @@ resource "azurerm_key_vault_access_policy" "vm_policy" {
 
   certificate_permissions = [
     "Get",
-    "List",
-    "Import",
-    "Delete"
+    "List"
   ]
 }
 
@@ -171,7 +169,7 @@ resource "azurerm_key_vault_access_policy" "current_user_policy" {
     "Get",
     "List"
   ]
-
+  certificate_permissions = ["Get", "List", "Import", "Delete"]
 }
 resource "azurerm_key_vault_certificate" "n8n_cert" {
   name         = "n8n-cert"
@@ -181,12 +179,18 @@ resource "azurerm_key_vault_certificate" "n8n_cert" {
     contents = filebase64("${path.module}/cert.pfx")
     password = var.cert_password
   }
+  depends_on = [
+    azurerm_key_vault_access_policy.current_user_policy
+  ]
 }
 
 resource "azurerm_key_vault_secret" "cert_password" {
   name         = "n8n-cert-password"
   value        = var.cert_password
   key_vault_id = azurerm_key_vault.kv.id
+  depends_on = [
+    azurerm_key_vault_access_policy.current_user_policy
+  ]
 }
 
 resource "random_password" "postgres_password" {
@@ -203,12 +207,18 @@ resource "azurerm_key_vault_secret" "postgres_password" {
   name         = "postgres-password"
   value        = random_password.postgres_password.result
   key_vault_id = azurerm_key_vault.kv.id
+  depends_on = [
+    azurerm_key_vault_access_policy.current_user_policy
+  ]
 }
 
 resource "azurerm_key_vault_secret" "n8n_encryption_key" {
   name         = "n8n-encryption-key"
   value        = random_password.n8n_encryption_key.result
   key_vault_id = azurerm_key_vault.kv.id
+  depends_on = [
+    azurerm_key_vault_access_policy.current_user_policy
+  ]
 }
 
 resource "azurerm_virtual_machine_extension" "startup" {
@@ -217,7 +227,10 @@ resource "azurerm_virtual_machine_extension" "startup" {
   publisher            = "Microsoft.Azure.Extensions"
   type                 = "CustomScript"
   type_handler_version = "2.1"
-  depends_on           = [azurerm_linux_virtual_machine.vm, azurerm_key_vault_access_policy.vm_policy]
+  depends_on           = [
+    azurerm_linux_virtual_machine.vm, 
+    azurerm_key_vault_access_policy.vm_policy
+    ]
 
   settings = <<SETTINGS
     {

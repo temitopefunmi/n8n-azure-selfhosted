@@ -9,10 +9,10 @@ SSL_DIR="/etc/nginx/ssl"
 RETRY_COUNT=5
 RETRY_DELAY=10
 
-log() { echo "[INSTALL] $1"; }
-fail() { echo "[ERROR] $1"; exit 1; }
+log()   { echo "[INSTALL] $1"; }
+fail()  { echo "[ERROR] $1"; exit 1; }
 
-# ---- Install prerequisites ----
+# ---- Update and install prerequisites ----
 log "Updating apt..."
 sudo apt-get update -y
 
@@ -20,6 +20,9 @@ log "Installing required packages..."
 sudo apt-get install -y --no-install-recommends \
   ca-certificates curl apt-transport-https lsb-release gnupg \
   docker.io docker-compose nginx jq openssl || fail "Package installation failed"
+
+sudo systemctl enable docker
+sudo systemctl start docker
 
 # ---- Install Azure CLI ----
 log "Installing Azure CLI..."
@@ -45,9 +48,6 @@ done
 
 az account show >/dev/null 2>&1 || fail "Managed identity login failed"
 
-sudo systemctl enable docker
-sudo systemctl start docker
-
 # ---- Fetch SSL certificate and password ----
 log "Fetching SSL certificate and password from Key Vault..."
 sudo mkdir -p "$SSL_DIR"
@@ -55,7 +55,7 @@ sudo mkdir -p "$SSL_DIR"
 # Fetch password with retries
 for i in $(seq 1 $RETRY_COUNT); do
     CERT_PASSWORD=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" \
-      --name "n8n-cert-password" --query value -o tsv) && break || \
+      --name "n8n-cert-password" --query value -o tsv | tr -d '\r\n') && break || \
     (log "Retrying fetch of cert password ($i/$RETRY_COUNT)..." && sleep $RETRY_DELAY)
 done
 
@@ -66,19 +66,22 @@ for i in $(seq 1 $RETRY_COUNT); do
     az keyvault certificate download \
       --vault-name "${KEYVAULT_NAME}" \
       --name "n8n-cert" \
-      --file "${SSL_DIR}/n8n.pfx" && break || \
+      --file "${SSL_DIR}/n8n.pfx" && [ -s "${SSL_DIR}/n8n.pfx" ] && break || \
     (log "Retrying fetch of n8n-cert ($i/$RETRY_COUNT)..." && sleep $RETRY_DELAY)
 done
 
 [ -f "${SSL_DIR}/n8n.pfx" ] || fail "Certificate file not found"
 
-# Extract PEM
+# Check PFX integrity
+sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -info -noout -password "pass:${CERT_PASSWORD}" || fail "PFX integrity check failed"
+
+# Extract PEM files
 log "Extracting PEM files from PFX..."
 sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -clcerts -nokeys \
-  -out "${SSL_DIR}/n8n.crt" -password pass:${CERT_PASSWORD} || fail "Failed to extract cert"
+  -out "${SSL_DIR}/n8n.crt" -password "pass:${CERT_PASSWORD}" || fail "Failed to extract certificate"
 
 sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -nocerts -nodes \
-  -out "${SSL_DIR}/n8n.key" -password pass:${CERT_PASSWORD} || fail "Failed to extract key"
+  -out "${SSL_DIR}/n8n.key" -password "pass:${CERT_PASSWORD}" || fail "Failed to extract private key"
 
 sudo chmod 640 "${SSL_DIR}/n8n.key"
 sudo chmod 644 "${SSL_DIR}/n8n.crt"

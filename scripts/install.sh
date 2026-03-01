@@ -72,6 +72,7 @@ sudo chmod 640 /etc/nginx/ssl/n8n.key
 sudo chmod 644 /etc/nginx/ssl/n8n.crt
 sudo chown root:www-data /etc/nginx/ssl/n8n.key
 
+
 # ---- NGINX config ----
 log "Configuring NGINX..."
 sudo mkdir -p /etc/nginx/sites-available /etc/nginx/sites-enabled

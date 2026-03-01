@@ -148,6 +148,9 @@ resource "azurerm_key_vault" "kv" {
       "Get",
       "List"
     ]
+    certificate_permissions = [
+    "Get"
+    ]
   }
 
   # Your user/service principal (read + write)

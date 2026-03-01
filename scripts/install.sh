@@ -48,20 +48,10 @@ done
 
 az account show >/dev/null 2>&1 || fail "Managed identity login failed"
 
-# ---- Fetch SSL certificate and password ----
-log "Fetching SSL certificate and password from Key Vault..."
+# ---- Fetch SSL certificate from Key Vault ----
+log "Fetching SSL certificate from Key Vault..."
 sudo mkdir -p "$SSL_DIR"
 
-# Fetch password with retries
-for i in $(seq 1 $RETRY_COUNT); do
-    CERT_PASSWORD=$(az keyvault secret show --vault-name "${KEYVAULT_NAME}" \
-      --name "n8n-cert-password" --query value -o tsv | tr -d '\r\n') && break || \
-    (log "Retrying fetch of cert password ($i/$RETRY_COUNT)..." && sleep $RETRY_DELAY)
-done
-
-[ -n "$CERT_PASSWORD" ] || fail "Certificate password is empty"
-
-# Fetch certificate with retries
 for i in $(seq 1 $RETRY_COUNT); do
     az keyvault certificate download \
       --vault-name "${KEYVAULT_NAME}" \
@@ -72,16 +62,13 @@ done
 
 [ -f "${SSL_DIR}/n8n.pfx" ] || fail "Certificate file not found"
 
-# Check PFX integrity
-sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -info -noout -password "pass:${CERT_PASSWORD}" || fail "PFX integrity check failed"
-
-# Extract PEM files
+# Extract PEM files (no password needed for self-signed cert)
 log "Extracting PEM files from PFX..."
-sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -clcerts -nokeys \
-  -out "${SSL_DIR}/n8n.crt" -password "pass:${CERT_PASSWORD}" || fail "Failed to extract certificate"
+sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -clcerts -nokeys -nodes \
+  -out "${SSL_DIR}/n8n.crt" || fail "Failed to extract certificate"
 
 sudo openssl pkcs12 -in "${SSL_DIR}/n8n.pfx" -nocerts -nodes \
-  -out "${SSL_DIR}/n8n.key" -password "pass:${CERT_PASSWORD}" || fail "Failed to extract private key"
+  -out "${SSL_DIR}/n8n.key" || fail "Failed to extract private key"
 
 sudo chmod 640 "${SSL_DIR}/n8n.key"
 sudo chmod 644 "${SSL_DIR}/n8n.crt"

@@ -149,7 +149,7 @@ resource "azurerm_key_vault" "kv" {
       "List"
     ]
     certificate_permissions = [
-    "Get"
+      "Get"
     ]
   }
 

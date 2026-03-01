@@ -164,6 +164,22 @@ resource "azurerm_key_vault" "kv" {
   depends_on = [ azurerm_linux_virtual_machine.vm ]
 }
 
+resource "azurerm_key_vault_certificate" "n8n_cert" {
+  name         = "n8n-cert"
+  key_vault_id = azurerm_key_vault.kv.id
+
+  certificate {
+    contents = filebase64("${path.module}/cert.pfx")
+    password = var.cert_password
+  }
+}
+
+resource "azurerm_key_vault_secret" "cert_password" {
+  name         = "n8n-cert-password"
+  value        = var.cert_password
+  key_vault_id = azurerm_key_vault.kv.id
+}
+
 resource "random_password" "postgres_password" {
   length  = 32
   special = true

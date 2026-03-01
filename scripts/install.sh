@@ -38,14 +38,32 @@ sudo systemctl enable docker
 sudo systemctl start docker
 
 # ---- SSL certificate ----
-log "Generating self-signed SSL certificate..."
+log "Fetching SSL certificate and password from Key Vault..."
 sudo mkdir -p /etc/nginx/ssl
-IP_ADDRESS=$(hostname -I | awk '{print $1}')
-sudo openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-  -keyout /etc/nginx/ssl/n8n.key \
+
+# Download the PFX
+az keyvault certificate download \
+  --vault-name "${KEYVAULT_NAME}" \
+  --name "n8n-cert" \
+  --file /etc/nginx/ssl/n8n.pfx
+
+# Get the password secret
+CERT_PASSWORD=$(az keyvault secret show \
+  --vault-name "${KEYVAULT_NAME}" \
+  --name "n8n-cert-password" \
+  --query value -o tsv)
+
+# Extract PEM files
+log "Extracting PEM files from PFX..."
+sudo openssl pkcs12 -in /etc/nginx/ssl/n8n.pfx \
+  -clcerts -nokeys \
   -out /etc/nginx/ssl/n8n.crt \
-  -subj "/CN=${IP_ADDRESS}" \
-  -addext "subjectAltName = IP:${IP_ADDRESS}"
+  -password pass:${CERT_PASSWORD}
+
+sudo openssl pkcs12 -in /etc/nginx/ssl/n8n.pfx \
+  -nocerts -nodes \
+  -out /etc/nginx/ssl/n8n.key \
+  -password pass:${CERT_PASSWORD}
 
 sudo chmod 640 /etc/nginx/ssl/n8n.key
 sudo chmod 644 /etc/nginx/ssl/n8n.crt

@@ -48,3 +48,9 @@ variable "docker_compose_url" {
   description = "Raw GitHub URL for docker-compose.yml"
   type        = string
 }
+
+variable "cert_password" {
+  description = "Password for the PFX certificate"
+  type        = string
+  sensitive   = true
+}

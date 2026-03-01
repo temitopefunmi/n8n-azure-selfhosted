@@ -41,11 +41,14 @@ sudo systemctl start docker
 log "Fetching SSL certificate and password from Key Vault..."
 sudo mkdir -p /etc/nginx/ssl
 
-# Download the PFX
-az keyvault certificate download \
+# Get the PFX as a secret (base64-encoded)
+CERT_PFX=$(az keyvault secret show \
   --vault-name "${KEYVAULT_NAME}" \
   --name "n8n-cert" \
-  --file /etc/nginx/ssl/n8n.pfx
+  --query value -o tsv)
+
+# Decode the base64 string into a .pfx file
+echo "$CERT_PFX" | base64 --decode > /etc/nginx/ssl/n8n.pfx
 
 # Get the password secret
 CERT_PASSWORD=$(az keyvault secret show \

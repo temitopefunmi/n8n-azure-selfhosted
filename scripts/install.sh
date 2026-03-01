@@ -35,6 +35,7 @@ command -v az >/dev/null 2>&1 || fail "Azure CLI installation failed"
 log "Azure CLI installed at $(which az)"
 
 # Authenticate with the VM's managed identity
+az logout --output none || true
 az login --identity --allow-no-subscriptions --output none || fail "Managed identity login failed"
 log "Logged in with VM's managed identity"
 

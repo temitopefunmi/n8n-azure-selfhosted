@@ -169,7 +169,7 @@ resource "azurerm_key_vault_access_policy" "current_user_policy" {
     "Get",
     "List"
   ]
-  certificate_permissions = ["Get", "List", "Import", "Delete"]
+  certificate_permissions = ["Get", "List", "Create", "Delete"]
 }
 resource "azurerm_key_vault_certificate" "n8n_cert" {
   name         = "n8n-cert"
@@ -195,7 +195,7 @@ resource "azurerm_key_vault_certificate" "n8n_cert" {
       subject            = "CN=demo.local"
       validity_in_months = 12
       key_usage = ["digitalSignature", "keyEncipherment"]
-      extended_key_usage = ["serverAuth"]
+      extended_key_usage = ["1.3.6.1.5.5.7.3.1"] # TLS Web Server Authentication
     }
   }
 

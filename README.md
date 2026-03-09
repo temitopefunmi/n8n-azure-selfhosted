@@ -74,6 +74,84 @@ No credentials exist on disk.
 
 ---
 
+# SSL Certificate Handling
+
+* Terraform provisions a self‑signed certificate in Key Vault (`n8n-cert`).
+* The VM retrieves the **secret** associated with the certificate:
+  ```bash
+  az keyvault secret show --vault-name <kv-name> --name n8n-cert --query value -o tsv | base64 --decode > /etc/nginx/ssl/n8n.pfx
+  ```
+* OpenSSL extracts the `.crt` and `.key`:
+  ```bash
+  openssl pkcs12 -in /etc/nginx/ssl/n8n.pfx -clcerts -nokeys -nodes -out /etc/nginx/ssl/n8n.crt
+  openssl pkcs12 -in /etc/nginx/ssl/n8n.pfx -nocerts -nodes -out /etc/nginx/ssl/n8n.key
+  ```
+* VM identity requires only **secret Get/List** permissions.
+* Optional: store a `n8n-cert-password` secret in Key Vault if you want to protect the `.pfx`.
+
+---
+
+# 🖥️ Local (before deployment)
+
+**1. Generate SSH keypair (if you don’t already have one):**
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/id_ed25519 -C "n8n-azure"
+```
+
+**2. Log in to Azure:**
+```bash
+az login
+```
+
+**3. Initialize Terraform:**
+```bash
+terraform init
+```
+
+**4. Apply Terraform plan:**
+```bash
+terraform apply
+```
+(wait for VM + Key Vault + secrets + extension to finish)
+
+---
+
+# 🌐 Accessing n8n
+
+**Option A: By IP**
+```bash
+https://<VM_PUBLIC_IP>
+```
+
+**Option B: By hostname (`demo.local`)**
+On macOS, edit `/etc/hosts`:
+```bash
+sudo nano /etc/hosts
+```
+Add:
+```
+<VM_PUBLIC_IP> demo.local
+```
+Flush DNS cache:
+```bash
+sudo dscacheutil -flushcache
+sudo killall -HUP mDNSResponder
+```
+Test:
+```bash
+ping demo.local
+```
+Then browse:
+```bash
+https://demo.local
+```
+
+---
+
+**Compliance Note:** For production, replace `demo.local` with a real DNS name and issue a certificate from a trusted CA (e.g., Let’s Encrypt, DigiCert).
+
+---
+
 # Repository Structure
 
 ```
@@ -101,16 +179,15 @@ After `terraform apply`:
 4. Secrets are generated and stored
 5. Custom Script Extension runs `install.sh`
 6. `install.sh`:
-
    * Installs Docker
    * Installs Docker Compose
    * Installs NGINX
    * Installs Azure CLI
-   * Configures self-signed SSL
+   * Fetches SSL certificate secret from Key Vault
+   * Extracts `.crt` and `.key` with OpenSSL
    * Creates systemd service (`n8n.service`)
 7. `systemd` starts `start-n8n.sh`
 8. `start-n8n.sh`:
-
    * Logs into Azure using Managed Identity
    * Fetches secrets
    * Exports environment variables
@@ -124,6 +201,10 @@ You can immediately open:
 
 ```
 https://<VM_PUBLIC_IP>
+```
+or, if `/etc/hosts` is updated:
+```
+https://demo.local
 ```
 
 ---
@@ -226,6 +307,12 @@ No SSH required.
 https://<VM_PUBLIC_IP>
 ```
 
+or
+
+```bash
+https://demo.local
+```
+
 First visit will show n8n setup screen.
 
 ---
@@ -300,6 +387,28 @@ Suitable foundation for regulated / healthcare-adjacent workloads.
 
 ---
 
+### 🔎 Checking Service Status
+Run:
+```bash
+sudo systemctl status n8n
+```
+
+---
+
+### 📜 Viewing Logs with `journalctl`
+```bash
+sudo journalctl -u n8n -f
+```
+
+---
+
+### ✅ Quick Health Check
+```bash
+curl -vk https://demo.local/
+```
+
+---
+
 # Cleanup
 
 ```bash
@@ -314,11 +423,12 @@ Portfolio-grade infrastructure project demonstrating secure automation platform 
 
 ---
 
-If you want, next we can:
+## Next Steps
 
 * Add proper domain + Let's Encrypt
 * Add Azure Load Balancer
 * Add Event Grid → automatic container restart on secret rotation
 * Replace self-signed cert with Azure Application Gateway
+```
 
-You’ve moved this from “it works on my VM” to actual production-grade infrastructure.
+---

@@ -145,7 +145,7 @@ server {
     ssl_certificate_key $SSL_DIR/n8n.key;
 
     location / {
-        proxy_pass http://localhost:5678;
+        proxy_pass http://127.0.0.1:5678;
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";

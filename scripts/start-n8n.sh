@@ -39,13 +39,17 @@ docker-compose down -v || true
 echo "Starting Postgres and n8n containers..."
 docker-compose up -d
 
-echo "Waiting for n8n to be ready..."
+echo "Waiting for n8n..."
 for i in {1..30}; do
-  if curl -s http://localhost:5678 > /dev/null; then
-    echo "n8n is up and running"
+  if curl -s http://127.0.0.1:5678 > /dev/null; then
+    echo "n8n ready"
     break
   fi
   sleep 2
 done
+
+echo "n8n started. Keeping service alive..."
+
+tail -f /dev/null
 
 echo "===== $(date) Startup script finished. n8n should be running via HTTPS. ====="

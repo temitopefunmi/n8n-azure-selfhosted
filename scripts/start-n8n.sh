@@ -34,7 +34,7 @@ echo "Docker is ready"
 cd /opt/n8n
 
 # Clean up any old containers
-docker-compose down -v || true
+docker-compose down || true
 
 echo "Starting Postgres and n8n containers..."
 docker-compose up -d

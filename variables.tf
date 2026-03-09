@@ -14,8 +14,8 @@ variable "vm_admin_username" {
 }
 
 
-variable "ssh_public_key_path" {
-  description = "Path to your SSH public key"
+variable "ssh_key_path" {
+  description = "Path to your SSH key"
   type = string
 }
 
@@ -49,8 +49,3 @@ variable "docker_compose_url" {
   type        = string
 }
 
-variable "cert_password" {
-  description = "Password for the PFX certificate"
-  type        = string
-  sensitive   = true
-}

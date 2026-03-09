@@ -204,16 +204,6 @@ resource "azurerm_key_vault_certificate" "n8n_cert" {
   ]
 }
 
-
-resource "azurerm_key_vault_secret" "cert_password" {
-  name         = "n8n-cert-password"
-  value        = var.cert_password
-  key_vault_id = azurerm_key_vault.kv.id
-  depends_on = [
-    azurerm_key_vault_access_policy.current_user_policy
-  ]
-}
-
 resource "random_password" "postgres_password" {
   length  = 32
   special = true

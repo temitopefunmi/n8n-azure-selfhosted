@@ -6,6 +6,7 @@ exec >> "$LOG_FILE" 2>&1
 
 echo "===== $(date) Starting n8n startup script ====="
 
+# Ensure KEYVAULT_NAME is set
 KEYVAULT_NAME="${KEYVAULT_NAME:?KEYVAULT_NAME is not set}"
 
 echo "Authenticating to Azure..."
@@ -32,11 +33,19 @@ echo "Docker is ready"
 
 cd /opt/n8n
 
+# Clean up any old containers
 docker-compose down -v || true
 
 echo "Starting Postgres and n8n containers..."
+docker-compose up -d
 
-# This keeps the service alive permanently
-exec docker-compose up
+echo "Waiting for n8n to be ready..."
+for i in {1..30}; do
+  if curl -s http://localhost:5678 > /dev/null; then
+    echo "n8n is up and running"
+    break
+  fi
+  sleep 2
+done
 
-echo "Startup script finished. n8n is now running in the background."
+echo "===== $(date) Startup script finished. n8n should be running via HTTPS. ====="

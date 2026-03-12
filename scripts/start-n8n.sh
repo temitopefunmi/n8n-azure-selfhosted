@@ -20,4 +20,22 @@ docker-compose down || true
 # Start in detached mode
 docker-compose up -d
 
-echo "n8n container started successfully."
+# -----------------------------
+# Wait until n8n is fully ready
+# -----------------------------
+echo "Waiting for n8n to be ready (this may take 20-30s)..."
+MAX_WAIT=60
+WAITED=0
+
+until curl -s http://127.0.0.1:5678/healthz > /dev/null 2>&1 || [ $WAITED -ge $MAX_WAIT ]; do
+  sleep 2
+  WAITED=$((WAITED+2))
+done
+
+if [ $WAITED -ge $MAX_WAIT ]; then
+  echo "[WARNING] n8n may not be fully ready yet."
+else
+  echo "n8n is ready and accessible!"
+fi
+
+echo "===== $(date) Startup script finished ====="

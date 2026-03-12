@@ -115,9 +115,26 @@ openssl pkcs12 -in "$SSL_DIR/n8n.pfx" -nocerts -nodes -passin pass: -out "$SSL_D
 chmod 600 "$SSL_DIR/n8n.key"
 chmod 644 "$SSL_DIR/n8n.crt"
 
+log "Creating loading page..."
+mkdir -p /var/www
+
+cat > /var/www/n8n-loading.html <<EOF
+<html>
+<head>
+<title>Starting...</title>
+</head>
+<body style="font-family:sans-serif;text-align:center;margin-top:100px;">
+<h1>n8n is starting</h1>
+<p>Please wait 10–30 seconds...</p>
+</body>
+</html>
+EOF
+
+
 log "Configuring Nginx..."
 cat > /etc/nginx/sites-available/n8n <<EOF
 server {
+
     listen 443 ssl;
     server_name _;
 
@@ -125,13 +142,22 @@ server {
     ssl_certificate_key $SSL_DIR/n8n.key;
 
     location / {
+
         proxy_pass http://127.0.0.1:5678;
+
         proxy_http_version 1.1;
         proxy_set_header Upgrade \$http_upgrade;
         proxy_set_header Connection "upgrade";
         proxy_set_header Host \$host;
-        proxy_read_timeout 90s;
-        proxy_connect_timeout 90s;
+
+        proxy_connect_timeout 5s;
+        proxy_read_timeout 30s;
+
+        error_page 502 503 504 = /n8n-loading.html;
+    }
+
+    location = /n8n-loading.html {
+        root /var/www;
     }
 }
 
@@ -166,10 +192,10 @@ After=docker.service
 Requires=docker.service
 
 [Service]
-Type=simple
+Type=oneshot
 WorkingDirectory=$TARGET_DIR
 ExecStart=$TARGET_DIR/start-n8n.sh
-Restart=always
+RemainAfterExit=yes
 EnvironmentFile=$TARGET_DIR/.env
 
 [Install]

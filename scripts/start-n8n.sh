@@ -1,6 +1,9 @@
 #!/bin/bash
 set -euo pipefail
 
+mkdir -p /opt/n8n
+
+cp /var/lib/waagent/custom-script/download/0/* /opt/n8n/
 LOG_FILE="/var/log/n8n-start.log"
 exec >> "$LOG_FILE" 2>&1
 
@@ -39,9 +42,14 @@ echo "Docker is ready"
 
 cd /opt/n8n
 
+cat > /opt/n8n/.env <<EOF
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+DB_POSTGRESDB_HOST=$DB_POSTGRESDB_HOST
+EOF
+
 # Clean up any old containers
 docker-compose down || true
-
 echo "Starting Postgres and n8n containers..."
 docker-compose up -d
 

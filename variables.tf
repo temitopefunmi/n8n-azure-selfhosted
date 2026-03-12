@@ -19,6 +19,11 @@ variable "ssh_key_path" {
   type = string
 }
 
+variable "ssh_private_key_path" {
+  description = "Path to the private SSH key file"
+  type        = string
+}
+
 variable "address_space" {
   description = "Address space for the virtual network"
   type = list(string)

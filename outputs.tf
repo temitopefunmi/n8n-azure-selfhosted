@@ -4,7 +4,7 @@ output "n8n_url" {
 }
 
 output "ssh_command" {
-  value       = "ssh ${var.vm_admin_username}@${azurerm_public_ip.public_ip.ip_address} -i ${var.ssh_key_path}" 
+  value       = "ssh ${var.vm_admin_username}@${azurerm_public_ip.public_ip.ip_address} -i ${var.ssh_private_key_path}" 
   description = "SSH command to connect to the VM"
 }
 

@@ -1,3 +1,12 @@
+terraform {
+  required_providers {
+    azurerm = {
+      source  = "hashicorp/azurerm"
+      version = "~> 3.0"
+    }
+  }
+}
+
 provider "azurerm" {
   features {}
 }
@@ -21,6 +30,7 @@ resource "azurerm_subnet" "subnet" {
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.address_prefixes
+  depends_on = [ azurerm_virtual_network.vnet ]
 }
 
 # Create a dedicated, empty subnet for the Database
@@ -29,6 +39,7 @@ resource "azurerm_subnet" "db_subnet" {
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.db_subnet_prefixes
+  depends_on = [ azurerm_virtual_network.vnet ]
 
   delegation {
     name = "db_delegation"
@@ -123,6 +134,7 @@ resource "azurerm_private_dns_zone_virtual_network_link" "dns_link" {
   resource_group_name   = azurerm_resource_group.rg.name
   private_dns_zone_name = azurerm_private_dns_zone.db_dns_zone.name
   virtual_network_id    = azurerm_virtual_network.vnet.id
+  depends_on = [ azurerm_private_dns_zone.db_dns_zone ]
 }
 
 resource "random_id" "rand" {
@@ -181,7 +193,7 @@ resource "azurerm_key_vault_access_policy" "vm_policy" {
   key_vault_id = azurerm_key_vault.kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_linux_virtual_machine.vm.identity[0].principal_id
-
+  depends_on = [ azurerm_key_vault.kv ]
   secret_permissions = [
     "Get",
     "List"
@@ -198,14 +210,16 @@ resource "azurerm_key_vault_access_policy" "current_user_policy" {
   key_vault_id = azurerm_key_vault.kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = data.azurerm_client_config.current.object_id
-
+  
   secret_permissions = [
     "Set",
     "Get",
     "List"
   ]
   certificate_permissions = ["Get", "List", "Create", "Delete"]
+  depends_on = [ azurerm_key_vault.kv ]
 }
+
 resource "azurerm_key_vault_certificate" "n8n_cert" {
   name         = "n8n-cert"
   key_vault_id = azurerm_key_vault.kv.id
@@ -235,6 +249,7 @@ resource "azurerm_key_vault_certificate" "n8n_cert" {
   }
 
   depends_on = [
+    azurerm_key_vault.kv,
     azurerm_key_vault_access_policy.current_user_policy
   ]
 }
@@ -269,15 +284,15 @@ resource "azurerm_key_vault_secret" "n8n_encryption_key" {
 
 # Create the Managed PostgreSQL Flexible Server
 resource "azurerm_postgresql_flexible_server" "postgres" {
-  name                = "${var.resource_prefix}-postgres"
+  name                = "${var.resource_prefix}-postgres-${random_id.rand.hex}"
   resource_group_name = azurerm_resource_group.rg.name
   location            = azurerm_resource_group.rg.location
   version             = "14"
   administrator_login = "n8nadmin"
   administrator_password = random_password.postgres_password.result
 
-  storage_mb         = 5120
-  sku_name           = "Standard_B1ms"
+  storage_mb         = 32768
+  sku_name           = "B_Standard_B1ms"
   backup_retention_days = 7
   geo_redundant_backup_enabled = false
   public_network_access_enabled = false
@@ -286,7 +301,9 @@ resource "azurerm_postgresql_flexible_server" "postgres" {
   private_dns_zone_id = azurerm_private_dns_zone.db_dns_zone.id
 
   depends_on = [
-    azurerm_key_vault_access_policy.current_user_policy
+    azurerm_key_vault_access_policy.current_user_policy,
+    azurerm_private_dns_zone.db_dns_zone,
+    azurerm_subnet.db_subnet
   ]
 }
 

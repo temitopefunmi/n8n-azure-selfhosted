@@ -29,6 +29,11 @@ variable "address_prefixes" {
   type = list(string)
 }
 
+variable "db_subnet_prefixes" {
+  description = "Address prefix for the DB subnet"
+  type = list(string)
+}
+
 variable "vm_size" {
   description = "Size of the VM"
   type = string

@@ -15,14 +15,20 @@ echo "Authenticating to Azure..."
 echo "Fetching secrets from Azure Key Vault..."
 POSTGRES_PASSWORD=$(/usr/bin/az keyvault secret show --vault-name "$KEYVAULT_NAME" --name postgres-password --query value -o tsv)
 N8N_ENCRYPTION_KEY=$(/usr/bin/az keyvault secret show --vault-name "$KEYVAULT_NAME" --name n8n-encryption-key --query value -o tsv)
+DB_POSTGRESDB_HOST=$(/usr/bin/az keyvault secret show --vault-name "$KEYVAULT_NAME" --name db-host --query value -o tsv)
 
-if [[ -z "$POSTGRES_PASSWORD" || -z "$N8N_ENCRYPTION_KEY" ]]; then
+if [[ -z "$POSTGRES_PASSWORD" || -z "$N8N_ENCRYPTION_KEY" || -z "$DB_POSTGRESDB_HOST" ]]; then
   echo "ERROR: Failed to retrieve required secrets from Key Vault"
   exit 1
 fi
 
 export POSTGRES_PASSWORD
 export N8N_ENCRYPTION_KEY
+export DB_POSTGRESDB_HOST
+export DB_POSTGRESDB_USER="n8nadmin"
+export DB_POSTGRESDB_PORT="5432"
+export DB_POSTGRESDB_DATABASE="postgres"
+
 echo "Secrets loaded successfully"
 
 echo "Waiting for Docker to be ready..."
@@ -47,9 +53,5 @@ for i in {1..30}; do
   fi
   sleep 2
 done
-
-echo "n8n started. Keeping service alive..."
-
-tail -f /dev/null
 
 echo "===== $(date) Startup script finished. n8n should be running via HTTPS. ====="

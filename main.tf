@@ -23,6 +23,27 @@ resource "azurerm_subnet" "subnet" {
   address_prefixes     = var.address_prefixes
 }
 
+# Create a dedicated, empty subnet for the Database
+resource "azurerm_subnet" "db_subnet" {
+  name                 = "${var.resource_prefix}-db-subnet"
+  resource_group_name  = azurerm_resource_group.rg.name
+  virtual_network_name = azurerm_virtual_network.vnet.name
+  address_prefixes     = var.db_subnet_prefixes
+
+  delegation {
+    name = "db_delegation"
+
+    service_delegation {
+      name = "Microsoft.DBforPostgreSQL/flexibleServers"
+
+      actions = [
+        "Microsoft.Network/virtualNetworks/subnets/action",
+        "Microsoft.Network/virtualNetworks/subnets/join/action",
+      ]
+    }
+  }
+}
+
 resource "azurerm_public_ip" "public_ip" {
   name                = "${var.resource_prefix}-public-ip"
   location            = azurerm_resource_group.rg.location
@@ -88,6 +109,20 @@ resource "azurerm_network_security_group" "nsg" {
 resource "azurerm_network_interface_security_group_association" "nsg_association" {
   network_interface_id      = azurerm_network_interface.nic.id
   network_security_group_id = azurerm_network_security_group.nsg.id
+}
+
+# Create a Private DNS Zone for the internal DB address
+resource "azurerm_private_dns_zone" "db_dns_zone" {
+  name                = "privatelink.postgres.database.azure.com"
+  resource_group_name = azurerm_resource_group.rg.name
+}
+
+# Link the DNS Zone to your VNet so the VM can resolve the DB hostname
+resource "azurerm_private_dns_zone_virtual_network_link" "dns_link" {
+  name                  = "${var.resource_prefix}-dns-link"
+  resource_group_name   = azurerm_resource_group.rg.name
+  private_dns_zone_name = azurerm_private_dns_zone.db_dns_zone.name
+  virtual_network_id    = azurerm_virtual_network.vnet.id
 }
 
 resource "random_id" "rand" {
@@ -228,6 +263,41 @@ resource "azurerm_key_vault_secret" "n8n_encryption_key" {
   value        = random_password.n8n_encryption_key.result
   key_vault_id = azurerm_key_vault.kv.id
   depends_on = [
+    azurerm_key_vault_access_policy.current_user_policy
+  ]
+}
+
+# Create the Managed PostgreSQL Flexible Server
+resource "azurerm_postgresql_flexible_server" "postgres" {
+  name                = "${var.resource_prefix}-postgres"
+  resource_group_name = azurerm_resource_group.rg.name
+  location            = azurerm_resource_group.rg.location
+  version             = "14"
+  administrator_login = "n8nadmin"
+  administrator_password = random_password.postgres_password.result
+
+  storage_mb         = 5120
+  sku_name           = "Standard_B1ms"
+  backup_retention_days = 7
+  geo_redundant_backup_enabled = false
+  public_network_access_enabled = false
+
+  delegated_subnet_id = azurerm_subnet.db_subnet.id
+  private_dns_zone_id = azurerm_private_dns_zone.db_dns_zone.id
+
+  depends_on = [
+    azurerm_key_vault_access_policy.current_user_policy
+  ]
+}
+
+# Store the DB Host in Key Vault so the VM can find it
+resource "azurerm_key_vault_secret" "db_host" {
+  name         = "db-host"
+  value        = azurerm_postgresql_flexible_server.postgres.fqdn
+  key_vault_id = azurerm_key_vault.kv.id
+
+  depends_on = [
+    azurerm_postgresql_flexible_server.postgres,
     azurerm_key_vault_access_policy.current_user_policy
   ]
 }

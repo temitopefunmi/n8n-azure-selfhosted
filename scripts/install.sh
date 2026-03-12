@@ -21,7 +21,6 @@ sleep 15
 # ------------------------
 # Update + packages
 # ------------------------
-
 log "Updating apt..."
 apt-get update -y
 
@@ -44,29 +43,22 @@ systemctl start docker
 # ------------------------
 # Azure CLI
 # ------------------------
-
 log "Installing Azure CLI..."
-
-curl -sL https://packages.microsoft.com/keys/microsoft.asc \
- | gpg --dearmor \
- | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
+curl -sL https://packages.microsoft.com/keys/microsoft.asc | gpg --dearmor \
+  | tee /etc/apt/trusted.gpg.d/microsoft.gpg > /dev/null
 
 AZ_REPO=$(lsb_release -cs)
-
 echo "deb [arch=amd64] https://packages.microsoft.com/repos/azure-cli/ $AZ_REPO main" \
- > /etc/apt/sources.list.d/azure-cli.list
+  > /etc/apt/sources.list.d/azure-cli.list
 
 apt-get update -y
 apt-get install -y azure-cli
-
 command -v az || fail "Azure CLI missing"
 
 # ------------------------
 # Managed identity login
 # ------------------------
-
 log "Waiting for managed identity..."
-
 for i in $(seq 1 $RETRY_COUNT); do
   az login --identity --allow-no-subscriptions --output none && break
   log "Retry login $i"
@@ -76,68 +68,56 @@ done
 az account show || fail "Managed identity failed"
 
 # ------------------------
-# Fetch certificate
+# Fetch secrets for .env
 # ------------------------
+log "Fetching secrets from Key Vault..."
+POSTGRES_PASSWORD=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name postgres-password --query value -o tsv)
+N8N_ENCRYPTION_KEY=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name n8n-encryption-key --query value -o tsv)
+DB_POSTGRESDB_HOST=$(az keyvault secret show --vault-name "$KEYVAULT_NAME" --name db-host --query value -o tsv)
 
-log "Fetching certificate from KeyVault..."
+[ -n "$POSTGRES_PASSWORD" ] && [ -n "$N8N_ENCRYPTION_KEY" ] && [ -n "$DB_POSTGRESDB_HOST" ] || fail "Secrets missing"
 
+mkdir -p "$TARGET_DIR"
+cat > "$TARGET_DIR/.env" <<EOF
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+N8N_ENCRYPTION_KEY=$N8N_ENCRYPTION_KEY
+DB_POSTGRESDB_HOST=$DB_POSTGRESDB_HOST
+DB_POSTGRESDB_USER=n8nadmin
+DB_POSTGRESDB_PORT=5432
+DB_POSTGRESDB_DATABASE=postgres
+EOF
+
+# ------------------------
+# SSL / Nginx
+# ------------------------
+log "Fetching and installing certificate..."
 mkdir -p "$SSL_DIR"
 
 for i in $(seq 1 $RETRY_COUNT); do
-
   SECRET_VALUE=$(az keyvault secret show \
     --vault-name "$KEYVAULT_NAME" \
     --name "n8n-cert" \
     --query value -o tsv) || true
 
-  if [ -n "$SECRET_VALUE" ]; then
-    echo "$SECRET_VALUE" | base64 -d > "$SSL_DIR/n8n.pfx"
-  fi
+  [ -n "$SECRET_VALUE" ] && echo "$SECRET_VALUE" | base64 -d > "$SSL_DIR/n8n.pfx"
 
-  if [ -s "$SSL_DIR/n8n.pfx" ]; then
-    break
-  fi
-
+  [ -s "$SSL_DIR/n8n.pfx" ] && break
   log "Retry cert $i"
   sleep $RETRY_DELAY
-
 done
 
-[ -f "$SSL_DIR/n8n.pfx" ] || fail "No cert"
+[ -f "$SSL_DIR/n8n.pfx" ] || fail "No certificate found"
 
-# ------------------------
-# Extract cert
-# ------------------------
-
-log "Extracting cert..."
-
-openssl pkcs12 \
- -in "$SSL_DIR/n8n.pfx" \
- -clcerts \
- -nokeys \
- -nodes \
- -passin pass: \
- -out "$SSL_DIR/n8n.crt"
-
-openssl pkcs12 \
- -in "$SSL_DIR/n8n.pfx" \
- -nocerts \
- -nodes \
- -passin pass: \
- -out "$SSL_DIR/n8n.key"
+# Extract cert/key
+openssl pkcs12 -in "$SSL_DIR/n8n.pfx" -clcerts -nokeys -nodes -passin pass: -out "$SSL_DIR/n8n.crt"
+openssl pkcs12 -in "$SSL_DIR/n8n.pfx" -nocerts -nodes -passin pass: -out "$SSL_DIR/n8n.key"
 
 chmod 600 "$SSL_DIR/n8n.key"
 chmod 644 "$SSL_DIR/n8n.crt"
 
-# ------------------------
-# NGINX
-# ------------------------
-
-log "Config nginx..."
-
+log "Configuring Nginx..."
 cat > /etc/nginx/sites-available/n8n <<EOF
 server {
-
     listen 443 ssl;
     server_name _;
 
@@ -163,30 +143,22 @@ EOF
 
 ln -sf /etc/nginx/sites-available/n8n /etc/nginx/sites-enabled/n8n
 rm -f /etc/nginx/sites-enabled/default
-
 nginx -t
 systemctl enable nginx
 systemctl restart nginx
 
 # ------------------------
-# Move files
+# Move scripts
 # ------------------------
-
-log "Prepare n8n dir..."
-
-mkdir -p "$TARGET_DIR"
-
+log "Moving start script and docker-compose.yml..."
 mv "$DOWNLOAD_DIR/start-n8n.sh" "$TARGET_DIR/"
 mv "$DOWNLOAD_DIR/docker-compose.yml" "$TARGET_DIR/"
-
 chmod +x "$TARGET_DIR/start-n8n.sh"
 
 # ------------------------
 # systemd service
 # ------------------------
-
-log "Creating service..."
-
+log "Creating systemd service..."
 cat > /etc/systemd/system/n8n.service <<EOF
 [Unit]
 Description=n8n
@@ -195,10 +167,10 @@ Requires=docker.service
 
 [Service]
 Type=simple
-Environment=KEYVAULT_NAME=$KEYVAULT_NAME
 WorkingDirectory=$TARGET_DIR
 ExecStart=$TARGET_DIR/start-n8n.sh
 Restart=always
+EnvironmentFile=$TARGET_DIR/.env
 
 [Install]
 WantedBy=multi-user.target
@@ -208,4 +180,4 @@ systemctl daemon-reload
 systemctl enable n8n
 systemctl restart n8n
 
-log "DONE"
+log "INSTALL COMPLETE"

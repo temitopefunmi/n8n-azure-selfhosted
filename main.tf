@@ -30,23 +30,20 @@ resource "azurerm_subnet" "subnet" {
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.address_prefixes
-  depends_on = [ azurerm_virtual_network.vnet ]
+  depends_on           = [azurerm_virtual_network.vnet]
 }
 
-# Create a dedicated, empty subnet for the Database
 resource "azurerm_subnet" "db_subnet" {
   name                 = "${var.resource_prefix}-db-subnet"
   resource_group_name  = azurerm_resource_group.rg.name
   virtual_network_name = azurerm_virtual_network.vnet.name
   address_prefixes     = var.db_subnet_prefixes
-  depends_on = [ azurerm_virtual_network.vnet ]
+  depends_on           = [azurerm_virtual_network.vnet]
 
   delegation {
     name = "db_delegation"
-
     service_delegation {
       name = "Microsoft.DBforPostgreSQL/flexibleServers"
-
       actions = [
         "Microsoft.Network/virtualNetworks/subnets/action",
         "Microsoft.Network/virtualNetworks/subnets/join/action",
@@ -122,19 +119,17 @@ resource "azurerm_network_interface_security_group_association" "nsg_association
   network_security_group_id = azurerm_network_security_group.nsg.id
 }
 
-# Create a Private DNS Zone for the internal DB address
 resource "azurerm_private_dns_zone" "db_dns_zone" {
   name                = "privatelink.postgres.database.azure.com"
   resource_group_name = azurerm_resource_group.rg.name
 }
 
-# Link the DNS Zone to your VNet so the VM can resolve the DB hostname
 resource "azurerm_private_dns_zone_virtual_network_link" "dns_link" {
   name                  = "${var.resource_prefix}-dns-link"
   resource_group_name   = azurerm_resource_group.rg.name
   private_dns_zone_name = azurerm_private_dns_zone.db_dns_zone.name
   virtual_network_id    = azurerm_virtual_network.vnet.id
-  depends_on = [ azurerm_private_dns_zone.db_dns_zone ]
+  depends_on            = [azurerm_private_dns_zone.db_dns_zone]
 }
 
 resource "random_id" "rand" {
@@ -177,6 +172,10 @@ resource "azurerm_linux_virtual_machine" "vm" {
   }
 }
 
+# --------------------
+# Key Vault and dependencies
+# --------------------
+
 resource "azurerm_key_vault" "kv" {
   name                        = "${var.resource_prefix}kv${random_id.rand.hex}"
   location                    = azurerm_resource_group.rg.location
@@ -185,24 +184,18 @@ resource "azurerm_key_vault" "kv" {
   sku_name                    = "standard"
   purge_protection_enabled    = false
   soft_delete_retention_days  = 7
-
 }
 
-# VM managed identity policy
+# VM managed identity access
 resource "azurerm_key_vault_access_policy" "vm_policy" {
   key_vault_id = azurerm_key_vault.kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = azurerm_linux_virtual_machine.vm.identity[0].principal_id
-  depends_on = [ azurerm_key_vault.kv ]
-  secret_permissions = [
-    "Get",
-    "List"
-  ]
 
-  certificate_permissions = [
-    "Get",
-    "List"
-  ]
+  secret_permissions      = ["Get", "List"]
+  certificate_permissions = ["Get", "List"]
+
+  depends_on = [azurerm_key_vault.kv]
 }
 
 # Current Terraform user policy
@@ -210,24 +203,20 @@ resource "azurerm_key_vault_access_policy" "current_user_policy" {
   key_vault_id = azurerm_key_vault.kv.id
   tenant_id    = data.azurerm_client_config.current.tenant_id
   object_id    = data.azurerm_client_config.current.object_id
-  
-  secret_permissions = [
-    "Set",
-    "Get",
-    "List"
-  ]
+
+  secret_permissions      = ["Set", "Get", "List"]
   certificate_permissions = ["Get", "List", "Create", "Delete"]
-  depends_on = [ azurerm_key_vault.kv ]
+
+  depends_on = [azurerm_key_vault.kv]
 }
 
+# Certificate must wait for user policy
 resource "azurerm_key_vault_certificate" "n8n_cert" {
   name         = "n8n-cert"
   key_vault_id = azurerm_key_vault.kv.id
 
   certificate_policy {
-    issuer_parameters {
-      name = "Self"   # tells Key Vault to generate a self-signed cert
-    }
+    issuer_parameters { name = "Self" }
 
     key_properties {
       exportable = true
@@ -243,17 +232,17 @@ resource "azurerm_key_vault_certificate" "n8n_cert" {
     x509_certificate_properties {
       subject            = "CN=demo.local"
       validity_in_months = 12
-      key_usage = ["digitalSignature", "keyEncipherment"]
-      extended_key_usage = ["1.3.6.1.5.5.7.3.1"] # TLS Web Server Authentication
+      key_usage           = ["digitalSignature", "keyEncipherment"]
+      extended_key_usage  = ["1.3.6.1.5.5.7.3.1"]
     }
   }
 
   depends_on = [
-    azurerm_key_vault.kv,
     azurerm_key_vault_access_policy.current_user_policy
   ]
 }
 
+# Random passwords
 resource "random_password" "postgres_password" {
   length  = 32
   special = true
@@ -264,11 +253,14 @@ resource "random_password" "n8n_encryption_key" {
   special = true
 }
 
+# Secrets wait for certificate
 resource "azurerm_key_vault_secret" "postgres_password" {
   name         = "postgres-password"
   value        = random_password.postgres_password.result
   key_vault_id = azurerm_key_vault.kv.id
+
   depends_on = [
+    azurerm_key_vault_certificate.n8n_cert,
     azurerm_key_vault_access_policy.current_user_policy
   ]
 }
@@ -277,37 +269,38 @@ resource "azurerm_key_vault_secret" "n8n_encryption_key" {
   name         = "n8n-encryption-key"
   value        = random_password.n8n_encryption_key.result
   key_vault_id = azurerm_key_vault.kv.id
+
   depends_on = [
+    azurerm_key_vault_certificate.n8n_cert,
     azurerm_key_vault_access_policy.current_user_policy
   ]
 }
 
-# Create the Managed PostgreSQL Flexible Server
+# PostgreSQL server
 resource "azurerm_postgresql_flexible_server" "postgres" {
-  name                = "${var.resource_prefix}-postgres-${random_id.rand.hex}"
-  resource_group_name = azurerm_resource_group.rg.name
-  location            = azurerm_resource_group.rg.location
-  version             = "14"
-  administrator_login = "n8nadmin"
-  administrator_password = random_password.postgres_password.result
-
-  storage_mb         = 32768
-  sku_name           = "B_Standard_B1ms"
-  backup_retention_days = 7
+  name                     = "${var.resource_prefix}-postgres-${random_id.rand.hex}"
+  resource_group_name      = azurerm_resource_group.rg.name
+  location                 = azurerm_resource_group.rg.location
+  version                  = "14"
+  administrator_login      = "n8nadmin"
+  administrator_password   = random_password.postgres_password.result
+  storage_mb               = 32768
+  sku_name                 = "B_Standard_B1ms"
+  backup_retention_days    = 7
   geo_redundant_backup_enabled = false
   public_network_access_enabled = false
-
-  delegated_subnet_id = azurerm_subnet.db_subnet.id
-  private_dns_zone_id = azurerm_private_dns_zone.db_dns_zone.id
+  delegated_subnet_id      = azurerm_subnet.db_subnet.id
+  private_dns_zone_id      = azurerm_private_dns_zone.db_dns_zone.id
 
   depends_on = [
-    azurerm_key_vault_access_policy.current_user_policy,
+    azurerm_key_vault_secret.postgres_password,
+    azurerm_key_vault_secret.n8n_encryption_key,
     azurerm_private_dns_zone.db_dns_zone,
     azurerm_subnet.db_subnet
   ]
 }
 
-# Store the DB Host in Key Vault so the VM can find it
+# DB host secret
 resource "azurerm_key_vault_secret" "db_host" {
   name         = "db-host"
   value        = azurerm_postgresql_flexible_server.postgres.fqdn
@@ -319,16 +312,19 @@ resource "azurerm_key_vault_secret" "db_host" {
   ]
 }
 
+# Startup extension
 resource "azurerm_virtual_machine_extension" "startup" {
   name                 = "n8n-setup"
   virtual_machine_id   = azurerm_linux_virtual_machine.vm.id
   publisher            = "Microsoft.Azure.Extensions"
   type                 = "CustomScript"
   type_handler_version = "2.1"
-  depends_on           = [
-    azurerm_linux_virtual_machine.vm, 
-    azurerm_key_vault_access_policy.vm_policy
-    ]
+
+  depends_on = [
+    azurerm_linux_virtual_machine.vm,
+    azurerm_key_vault_access_policy.vm_policy,
+    azurerm_key_vault_secret.db_host
+  ]
 
   settings = <<SETTINGS
     {

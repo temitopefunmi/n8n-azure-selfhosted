@@ -121,11 +121,13 @@ mkdir -p /var/www
 cat > /var/www/n8n-loading.html <<EOF
 <html>
 <head>
-<title>Starting...</title>
+    <meta http-equiv="refresh" content="5">
+    <title>Starting n8n...</title>
 </head>
 <body style="font-family:sans-serif;text-align:center;margin-top:100px;">
-<h1>n8n is starting</h1>
-<p>Please wait 10–30 seconds...</p>
+    <h1>n8n is starting</h1>
+    <p>Please wait 10 to 30 seconds...</p>
+    <p style="color: gray; font-size: 0.8em;">This page will refresh automatically.</p>
 </body>
 </html>
 EOF

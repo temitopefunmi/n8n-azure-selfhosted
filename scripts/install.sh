@@ -192,10 +192,11 @@ After=docker.service
 Requires=docker.service
 
 [Service]
-Type=oneshot
+Type=simple
 WorkingDirectory=$TARGET_DIR
 ExecStart=$TARGET_DIR/start-n8n.sh
-RemainAfterExit=yes
+Restart=always
+RestartSec=5
 EnvironmentFile=$TARGET_DIR/.env
 
 [Install]
